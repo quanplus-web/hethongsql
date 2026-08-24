@@ -1,0 +1,30 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Outputs / Generated files
+output/
+error.txt
+error_stmt.txt
+extracted_chat.txt
+kiemtra.txt
+test.txt
+*.pdf
+
+# Mock files
+data/mock_drive/
