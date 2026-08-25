@@ -31,7 +31,7 @@ def escape_sql_val(val: Any) -> str:
     s = s.replace("'", "''")
     return f"'{s}'"
 
-def transform_dataframe(sheet_name: str, df: pd.DataFrame) -> Tuple[List[str], List[List[str]], pd.DataFrame]:
+def transform_dataframe(sheet_name: str, df: pd.DataFrame, custom_mapping: Dict[str, str] = None) -> Tuple[List[str], List[List[str]], pd.DataFrame]:
     cleaned_df = df.copy()
     cleaned_df.dropna(how="all", inplace=True) # Xóa các dòng trống hoàn toàn
     
@@ -40,7 +40,13 @@ def transform_dataframe(sheet_name: str, df: pd.DataFrame) -> Tuple[List[str], L
     seen_cols = set()
     
     for c in raw_columns:
-        norm = normalize_name(str(c))
+        if custom_mapping and str(c) in custom_mapping:
+            norm = custom_mapping[str(c)]
+            # Nếu tên map bị trống, fallback về normalize
+            if not norm:
+                norm = normalize_name(str(c))
+        else:
+            norm = normalize_name(str(c))
         original_norm = norm
         count = 1
         while norm in seen_cols:
@@ -58,12 +64,13 @@ def transform_dataframe(sheet_name: str, df: pd.DataFrame) -> Tuple[List[str], L
         
     return sql_columns, sql_rows, cleaned_df
 
-def run_transform(tables_data: Dict[str, pd.DataFrame]) -> Dict[str, Dict]:
+def run_transform(tables_data: Dict[str, pd.DataFrame], custom_mapping: Dict[str, Dict[str, str]] = None) -> Dict[str, Dict]:
     transformed = {}
     print("[*] Đang làm sạch và chuẩn hóa kiểu dữ liệu cho các bảng...")
     
     for sheet_name, df in tables_data.items():
-        sql_cols, sql_rows, cleaned_df = transform_dataframe(sheet_name, df)
+        sheet_mapping = custom_mapping.get(sheet_name) if custom_mapping else None
+        sql_cols, sql_rows, cleaned_df = transform_dataframe(sheet_name, df, sheet_mapping)
         table_name = normalize_name(sheet_name)
         transformed[sheet_name] = {
             "table_name": table_name,

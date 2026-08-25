@@ -487,13 +487,21 @@ HTML_TEMPLATE = """
     </div>
   </div>
 
+  <!-- CARD MAPPING CỘT (Ẩn mặc định, hiện khi upload thành công) -->
+  <div class="card" id="mappingCard" style="display: none;">
+    <div style="font-weight: 700; font-size: 13px; margin-bottom: 12px; color: #1e293b;">🛠️ Bảng Cấu Hình Mapping Cột</div>
+    <div id="mappingContainer" style="max-height: 400px; overflow-y: auto;">
+      <!-- Nội dung mapping sẽ render qua JS -->
+    </div>
+  </div>
+
   <!-- CARD DASHBOARD KẾT QUẢ -->
   <div class="card card-results">
     <!-- TABS BAR -->
     <div class="tabs-bar">
-      <button class="tab-item active" onclick="switchTab('tab-summary')">📊 Ma Trận Đối Soát</button>
-      <button class="tab-item" onclick="switchTab('tab-files')">📎 Tệp Drive Đã Map (<span id="fileTabCount">0</span>)</button>
-      <button class="tab-item" onclick="switchTab('tab-sql')">📝 Xem File SQL</button>
+      <button class="tab-item active" onclick="switchTab('tab-summary', this)">📊 Ma Trận Đối Soát</button>
+      <button class="tab-item" onclick="switchTab('tab-files', this)">📎 Tệp Drive Đã Map (<span id="fileTabCount">0</span>)</button>
+      <button class="tab-item" onclick="switchTab('tab-sql', this)">📝 Xem File SQL</button>
     </div>
 
     <!-- TAB 1: SUMMARY BOARD -->
@@ -655,6 +663,10 @@ HTML_TEMPLATE = """
         uploadedFilePath = data.file_path;
         document.getElementById('fileNameDisplay').innerText = ' (✓ ' + file.name + ')';
 
+        if (data.sheets_info) {
+          renderMappingUI(data.sheets_info);
+        }
+
         // Không tự động chạy migration ở đây nữa, để người dùng tự bấm nút
       } else {
         alert('Lỗi nạp file: ' + data.message);
@@ -700,11 +712,42 @@ HTML_TEMPLATE = """
     }
   }
 
-  function switchTab(tabId) {
+  function switchTab(tabId, el) {
     document.querySelectorAll('.tab-item').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    event.target.classList.add('active');
+    if (el) el.classList.add('active');
     document.getElementById(tabId).classList.add('active');
+  }
+
+  function renderMappingUI(sheetsInfo) {
+    const container = document.getElementById('mappingContainer');
+    container.innerHTML = '';
+    
+    let html = '<div style="display: flex; flex-direction: column; gap: 16px;">';
+    for (const [sheet, cols] of Object.entries(sheetsInfo)) {
+      html += `
+        <div style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+          <div style="background: #f8fafc; padding: 8px 12px; font-weight: 700; font-size: 12px; border-bottom: 1px solid #e2e8f0;">Sheet: ${sheet}</div>
+          <table style="width: 100%; border-radius: 0;">
+            <thead><tr><th style="width:50%; padding: 8px 12px;">Cột Gốc (Excel)</th><th style="width:50%; padding: 8px 12px;">Cột Đích (SQL)</th></tr></thead>
+            <tbody>
+      `;
+      cols.forEach((c) => {
+        html += `
+          <tr>
+            <td style="padding: 6px 12px; background: #fafafa; font-family: 'JetBrains Mono', monospace;">${c.raw}</td>
+            <td style="padding: 6px 12px;">
+              <input type="text" class="mapping-input" data-sheet="${sheet}" data-raw="${c.raw}" value="${c.norm}" style="padding: 4px 8px; font-size: 11.5px;" />
+            </td>
+          </tr>
+        `;
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    
+    container.innerHTML = html;
+    document.getElementById('mappingCard').style.display = 'block';
   }
 
   async function runMigration() {
@@ -720,8 +763,23 @@ HTML_TEMPLATE = """
     btn.disabled = true;
     btn.innerHTML = '⏳ Đang xử lý...';
 
+    // Ẩn bảng mapping cho gọn
+    const mappingCard = document.getElementById('mappingCard');
+    if (mappingCard) mappingCard.style.display = 'none';
+
     const driveEl = document.getElementById('driveId');
     const driveIdVal = driveEl ? driveEl.value.trim() : '';
+
+    const columnMapping = {};
+    const mappingInputs = document.querySelectorAll('.mapping-input');
+    mappingInputs.forEach(input => {
+      const sheet = input.getAttribute('data-sheet');
+      const raw = input.getAttribute('data-raw');
+      const norm = input.value.trim();
+      
+      if (!columnMapping[sheet]) columnMapping[sheet] = {};
+      columnMapping[sheet][raw] = norm;
+    });
 
     try {
       const res = await fetch('/api/run-migration', {
@@ -730,7 +788,8 @@ HTML_TEMPLATE = """
         body: JSON.stringify({
           excel_path: excelVal,
           sheet_id: sheetIdVal,
-          drive_id: driveIdVal
+          drive_id: driveIdVal,
+          column_mapping: columnMapping
         })
       });
       const data = await res.json();
@@ -876,12 +935,31 @@ def api_upload_excel():
             
         save_path = BASE_DIR / "data" / "uploaded_custom_data.xlsx"
         file.save(save_path)
+
+        # Xóa các file trong thư mục mock_drive để tránh dính file của lần chạy cũ
+        import shutil
+        mock_dir = BASE_DIR / "data" / "mock_drive"
+        if mock_dir.exists():
+            shutil.rmtree(mock_dir)
+        mock_dir.mkdir(parents=True, exist_ok=True)
+        
+        sheets_info = {}
+        try:
+            from pipeline.table_schema import normalize_name
+            xl = pd.ExcelFile(save_path)
+            for sheet in xl.sheet_names:
+                df = pd.read_excel(xl, sheet_name=sheet, nrows=0)
+                raw_cols = list(df.columns)
+                sheets_info[sheet] = [{"raw": str(c), "norm": normalize_name(str(c))} for c in raw_cols]
+        except Exception as ex:
+            print("Lỗi đọc metadata Excel:", ex)
         
         return jsonify({
             "status": "success", 
             "message": "Đã lưu file thành công", 
             "file_path": "data/uploaded_custom_data.xlsx",
-            "file_name": file.filename
+            "file_name": file.filename,
+            "sheets_info": sheets_info
         })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -917,12 +995,13 @@ def api_run_migration():
         req = request.json or {}
         excel_path = req.get("excel_path")
         drive_id = req.get("drive_id")
+        column_mapping = req.get("column_mapping", {})
         
         if not excel_path and not req.get("sheet_id"):
             return jsonify({"status": "error", "message": "Chưa chọn nguồn dữ liệu Excel hoặc Sheet ID"}), 400
             
         tables_data, drive_files = run_extract(excel_path=excel_path, drive_folder_id=drive_id)
-        transformed = run_transform(tables_data)
+        transformed = run_transform(tables_data, custom_mapping=column_mapping)
         _, mapped_files, missing_audit = run_file_mapping(transformed, drive_files)
         sql_outputs = run_generate_sql(transformed, mapped_files)
         val_outputs = run_validation(transformed, mapped_files, missing_audit)
