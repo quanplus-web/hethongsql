@@ -1051,6 +1051,6 @@ def download_file(filename):
     return send_from_directory(BASE_DIR / config.OUTPUT_DIR, filename, as_attachment=True)
 
 if __name__ == "__main__":
-    port = 5000
-    print(f"[*] Đang khởi động Web App Tool tại: http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)
+    port = int(os.environ.get("PORT", 5000))
+    print(f"[*] Đang khởi động Web App Tool tại port: {port}")
+    app.run(host="0.0.0.0", port=port, debug=False)
